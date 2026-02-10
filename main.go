@@ -49,7 +49,7 @@ func main() {
 	fmt.Println(` | |     |  __  | |  | |\___ \ `)
 	fmt.Println(` | |____ | |  | | |__| |____) |`)
 	fmt.Println(`  \______|_|  |_|\___\_\_____/ `)
-	fmt.Println("\n ✨ CHQS Studio (Chasqui Quick Studio) está listo!")
+	fmt.Println("\n ✨ GPHR Studio (Gopher Quick Studio) está listo!")
 	fmt.Println(" -------------------------------------------")
 	fmt.Println(" 📺 Panel de Control: http://localhost:8080")
 	fmt.Println(" -------------------------------------------")

@@ -1,6 +1,6 @@
-# CHQS Studio (Chasqui Quick Studio)
+# GPHR Studio (Gopher Quick Studio)
 
-**CHQS** es una estación de transmisión local diseñada para ser ligera, rápida y estética, construida con **Go** y **Vue 3**.
+**GPHR** es una estación de transmisión local diseñada para ser ligera, rápida y estética, construida con **Go** y **Vue 3**.
 
 ## 🚀 Estado Actual
 El proyecto utiliza un servidor de backend en Go para la señalización WebRTC y la orquestación de FFmpeg, y un frontend en Vue para la interfaz de control.

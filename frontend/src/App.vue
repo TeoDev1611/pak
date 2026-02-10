@@ -46,7 +46,7 @@ const toggleTunnel = async () => {
       <div class="w-20 h-20 bg-orange-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-orange-500/20 mb-8">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
       </div>
-      <h1 class="text-4xl font-poppins font-bold text-white mb-2">Chasqui Studio</h1>
+      <h1 class="text-4xl font-poppins font-bold text-white mb-2">GPHR Studio</h1>
       <p class="text-slate-400 mb-8 max-w-md text-sm">Prepara tu cámara y micrófono antes de entrar.</p>
       
       <div class="w-full max-w-sm bg-slate-900 border border-white/5 rounded-2xl p-6 text-left">

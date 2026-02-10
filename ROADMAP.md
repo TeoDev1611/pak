@@ -1,4 +1,4 @@
-# ROADMAP DE RESCATE Y ESTABILIZACIÓN: Chasqui Studio
+# ROADMAP DE RESCATE Y ESTABILIZACIÓN: GPHR Studio
 
 Este documento define la nueva estrategia técnica para eliminar el lag, arreglar los layouts y profesionalizar la aplicación, separando la **Vista Previa** (lo que ve el usuario) del **Motor de Transmisión** (lo que se envía a internet).
 

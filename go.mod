@@ -1,4 +1,4 @@
-module chasqui
+module gphr
 
 go 1.23
 
