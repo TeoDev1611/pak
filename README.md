@@ -1,27 +1,38 @@
 # CHQS Studio (Chasqui Quick Studio)
 
-**CHQS** es una estación de transmisión local "Mini StreamYard" diseñada para ser ligera, rápida y estética.
+**CHQS** es una estación de transmisión local diseñada para ser ligera, rápida y estética, construida con **Go** y **Vue 3**.
 
 ## 🚀 Estado Actual
-El proyecto se encuentra en **Fase de Estabilización de UI**. Se ha migrado de un motor de renderizado de Canvas (PixiJS) a una arquitectura de **Vista Previa HTML5 Nativa** para eliminar la latencia en entornos Linux.
+El proyecto utiliza un servidor de backend en Go para la señalización WebRTC y la orquestación de FFmpeg, y un frontend en Vue para la interfaz de control.
 
 ### Lo que funciona:
+- [x] **Arquitectura:** Go + Vue 3 (Vite) + Tailwind CSS.
 - [x] **Lobby de Entrada:** Control de nombre y permisos de hardware.
 - [x] **WebRTC:** Conexión bidireccional entre Anfitrión e Invitado.
 - [x] **Túneles:** Generación de links de invitado vía `localhost.run`.
 - [x] **Layouts:** Solo, Grid (Pegado) y Zoom (Espaciado) con escalado 16:9 automático.
-- [x] **Estética:** Dark mode profesional con acentos Naranja/Teal.
 
-### 🛠 Pendientes (Para Mañana):
-1.  **Arreglar el Ratio del Canvas:** Asegurar que el contenedor 16:9 se centre perfectamente sin barras negras laterales (Letterboxing dinámico).
-2.  **Motor de Composición Oculto:** Re-implementar el Canvas (oculto) para capturar la imagen final para streaming.
-3.  **Compartir Pantalla:** Integrar el stream de pantalla como una fuente adicional en los layouts.
-4.  **Integración FFmpeg:** Conectar el canvas capturado con el binario de FFmpeg en el backend.
+### 🛠 Pendientes:
+1.  **Ajuste de Ratio:** Centrar el lienzo 16:9 sin letterboxing desproporcionado.
+2.  **Motor de Composición:** Implementar canvas oculto para la captura de streaming.
+3.  **Compartir Pantalla:** Integrar la fuente de pantalla en los layouts.
+4.  **Streaming:** Conexión final con FFmpeg.
 
 ## 🛠 Desarrollo
-Para ejecutar en modo desarrollo:
+
+### 1. Preparar el Frontend
 ```bash
-wails dev
+cd frontend
+npm install
+npm run build
 ```
 
-El servidor de señalización corre internamente en el puerto `8080`.
+### 2. Ejecutar el Servidor (Backend)
+Desde la raíz del proyecto:
+```bash
+go run .
+```
+El estudio se abrirá automáticamente en tu navegador en `http://localhost:8080`.
+
+## 📡 Señalización
+El servidor de señales corre internamente en `/ws` para gestionar el intercambio de SDP y Candidatos entre los participantes.
