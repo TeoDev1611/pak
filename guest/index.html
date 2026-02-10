@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chasqui Guest Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&display=swap" rel="stylesheet">
+    <style>
+        body { height: 100dvh; background-color: #020617; color: white; font-family: sans-serif; overflow: hidden; margin: 0; }
+        .video-box { position: relative; flex: 1; background: #000; border-radius: 1rem; overflow: hidden; border: 1px solid rgba(255,255,255,0.05); }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        @media (max-width: 768px) {
+            .studio-container { flex-direction: column !important; }
+            .video-box { aspect-ratio: 16 / 9; flex: none; width: 100%; }
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center">
+
+    <!-- LOBBY -->
+    <div id="lobby" class="fixed inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center text-center p-4">
+        <h1 class="text-2xl font-bold mb-6 font-poppins">Chasqui <span class="text-orange-500">Guest</span></h1>
+        <div class="w-full max-w-sm bg-slate-900 border border-white/5 rounded-2xl p-5 shadow-2xl">
+            <video id="previewVideo" autoplay playsinline muted class="rounded-xl aspect-video mb-5 border border-white/10 transform scale-x-[-1] bg-black"></video>
+            <input id="guestName" placeholder="Tu nombre" class="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-white mb-5 focus:ring-2 ring-orange-500 outline-none text-center" />
+            <button onclick="joinStudio()" class="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-95 uppercase text-sm tracking-widest">Unirse ahora</button>
+        </div>
+    </div>
+
+    <!-- STUDIO -->
+    <div id="studio" class="hidden fixed inset-0 w-full h-full flex flex-col p-3 gap-3">
+        <div class="flex-1 flex flex-row studio-container gap-3 min-h-0">
+            <div class="video-box">
+                <video id="hostVideo" autoplay playsinline></video>
+                <div class="absolute bottom-2 left-2 bg-black/60 px-2 py-0.5 rounded text-[8px] font-bold uppercase">Anfitrión</div>
+            </div>
+            <div class="video-box">
+                <video id="liveVideo" autoplay playsinline muted class="transform scale-x-[-1]"></video>
+                <div class="absolute bottom-2 left-2 bg-black/60 px-2 py-0.5 rounded text-[8px] font-bold uppercase" id="labelTú">Tú</div>
+            </div>
+        </div>
+        <!-- FOOTER CONTROLS -->
+        <div class="h-16 flex justify-center items-center gap-4 bg-slate-900/50 rounded-2xl border border-white/5">
+            <button onclick="toggleMic()" id="btnMic" class="w-10 h-10 rounded-xl bg-slate-800 border border-white/10 flex items-center justify-center transition-all"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg></button>
+            <button onclick="toggleCam()" id="btnCam" class="w-10 h-10 rounded-xl bg-slate-800 border border-white/10 flex items-center justify-center transition-all"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button>
+            <div class="h-6 w-[1px] bg-white/10"></div>
+            <button onclick="leaveStudio()" class="bg-red-600 px-6 py-2 rounded-xl font-bold text-[10px] uppercase tracking-wider shadow-lg">Salir</button>
+        </div>
+    </div>
+
+    <script>
+        let localStream, pc, ws, isMicOn = true, isCamOn = true;
+
+        async function init() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById('previewVideo').srcObject = localStream;
+            } catch (e) { alert("Acceso a cámara denegado"); }
+        }
+        window.onload = init;
+
+        function toggleMic() { isMicOn = !isMicOn; localStream.getAudioTracks()[0].enabled = isMicOn; document.getElementById('btnMic').classList.toggle('bg-red-500/20', !isMicOn); }
+        function toggleCam() { isCamOn = !isCamOn; localStream.getVideoTracks()[0].enabled = isCamOn; document.getElementById('btnCam').classList.toggle('bg-red-500/20', !isCamOn); }
+
+        async function joinStudio() {
+            const name = document.getElementById('guestName').value || "Invitado";
+            document.getElementById('labelTú').innerText = name;
+            document.getElementById('lobby').classList.add('hidden');
+            document.getElementById('studio').classList.remove('hidden');
+            document.getElementById('liveVideo').srcObject = localStream;
+            
+            const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+            ws = new WebSocket(`${protocol}://${location.host}/ws`);
+            pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+
+            localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+            pc.ontrack = (e) => { document.getElementById('hostVideo').srcObject = e.streams[0]; };
+            pc.onicecandidate = (e) => { if (e.candidate) ws.send(JSON.stringify({ type: 'candidate', candidate: e.candidate })); };
+
+            ws.onmessage = async (e) => {
+                const msg = JSON.parse(e.data);
+                if (msg.type === 'offer') {
+                    await pc.setRemoteDescription(new RTCSessionDescription(msg));
+                    const ans = await pc.createAnswer(); await pc.setLocalDescription(ans);
+                    ws.send(JSON.stringify({ type: 'answer', sdp: ans.sdp }));
+                } else if (msg.type === 'answer') { await pc.setRemoteDescription(new RTCSessionDescription(msg)); }
+                else if (msg.type === 'candidate') { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); }
+            };
+
+            ws.onopen = async () => {
+                const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+                ws.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
+            };
+        }
+        function leaveStudio() { location.reload(); }
+    </script>
+</body>
+</html>

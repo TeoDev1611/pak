@@ -1,0 +1,11 @@
+# Go
+main
+chasqui
+*.exe
+
+# Node
+node_modules/
+dist/
+
+# Chasqui
+dev.sh

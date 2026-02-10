@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* Estilos base para asegurar que el app ocupe toda la pantalla */
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #020617;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
