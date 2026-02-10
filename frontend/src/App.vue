@@ -1,160 +1,157 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import * as AppGo from './services/api.js'
-import VideoCanvas from './components/VideoCanvas.vue'
-import { useStudioStore } from './stores/studio'
-import QrcodeVue from 'qrcode.vue'
+import { ref, onMounted, watch } from 'vue';
+import * as AppGo from './services/api.js';
+import { useStudioStore } from './stores/studio';
 
-const studio = useStudioStore()
-const isTunnelActive = ref(false)
-const isTunnelLoading = ref(false)
-const guestLink = ref('')
+// Componentes
+import VideoCanvas from './components/VideoCanvas.vue';
+import StudioHeader from './components/StudioHeader.vue';
+import StudioSidebar from './components/StudioSidebar.vue';
+import StudioFooter from './components/StudioFooter.vue';
+import UserCameraCard from './components/UserCameraCard.vue';
+
+const studio = useStudioStore();
+const videoCanvas = ref(null);
+
+const isTunnelActive = ref(false);
+const isTunnelLoading = ref(false);
+const guestLink = ref('');
+const isStreaming = ref(false);
 
 const startStudio = async () => {
   await studio.initLocalStream();
-}
+};
+
+const toggleStreaming = async () => {
+  if (isStreaming.value) {
+    await AppGo.StopStream();
+    isStreaming.value = false;
+    return;
+  }
+  try {
+    await AppGo.StartStream(studio.rtmpUrl);
+    if (videoCanvas.value) await videoCanvas.value.connectToStudio();
+    isStreaming.value = true;
+  } catch (err) {
+    console.error(err);
+  }
+};
 
 const toggleTunnel = async () => {
   if (isTunnelActive.value) {
-    await AppGo.ToggleTunnel()
-    isTunnelActive.value = false
-    return
+    await AppGo.ToggleTunnel();
+    isTunnelActive.value = false;
+    return;
   }
-  isTunnelLoading.value = true
+  isTunnelLoading.value = true;
   try {
-    const output = await AppGo.ToggleTunnel()
+    const output = await AppGo.ToggleTunnel();
     if (output && output !== 'timeout') {
-      const match = output.match(/([a-z0-9-]+\.lhr\.(life|pro|rocks))/)
+      const match = output.match(/([a-z0-9-]+\.lhr\.(life|pro|rocks))/);
       if (match) {
-        guestLink.value = `https://${match[1]}/invitado`
-        isTunnelActive.value = true
+        guestLink.value = `https://${match[1]}/invitado`;
+        isTunnelActive.value = true;
       }
     }
-  } catch (err) {
-    console.error(err)
   } finally {
-    isTunnelLoading.value = false
+    isTunnelLoading.value = false;
   }
-}
+};
+
+onMounted(() => { studio.initLocalStream(); });
 </script>
 
 <template>
-  <div class="flex flex-col h-screen bg-[#020617] text-slate-200 overflow-hidden font-sans">
+  <div class="flex flex-col h-screen bg-[#020617] text-slate-200 overflow-hidden font-sans select-none">
     
     <!-- LOBBY -->
-    <div v-if="!studio.isInitialized" class="fixed inset-0 z-[200] bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
-      <div class="w-20 h-20 bg-orange-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-orange-500/20 mb-8">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
-      </div>
-      <h1 class="text-4xl font-poppins font-bold text-white mb-2">GPHR Studio</h1>
-      <p class="text-slate-400 mb-8 max-w-md text-sm">Prepara tu cámara y micrófono antes de entrar.</p>
-      
-      <div class="w-full max-w-sm bg-slate-900 border border-white/5 rounded-2xl p-6 text-left">
-        <label class="block text-[10px] font-bold uppercase text-slate-500 mb-2">Tu nombre</label>
-        <input v-model="studio.userName" class="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 ring-orange-500 outline-none mb-4" />
-        <button @click="startStudio" class="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-4 rounded-xl shadow-xl transition-all active:scale-95">ENTRAR AL ESTUDIO</button>
-      </div>
+    <div v-if="!studio.isInitialized" class="fixed inset-0 z-[1000] bg-[#020617] flex flex-col items-center justify-center p-6 text-center">
+       <div class="flex flex-col md:flex-row gap-12 items-center max-w-5xl w-full">
+         <div class="flex-1 aspect-video bg-black rounded-[2rem] overflow-hidden border-8 border-slate-900 shadow-2xl relative">
+           <video v-if="studio.localStream" :srcObject="studio.localStream" autoplay playsinline muted class="w-full h-full object-cover -scale-x-100"></video>
+         </div>
+         <div class="w-full max-w-sm text-left space-y-8">
+           <h1 class="text-6xl font-black tracking-tighter text-white">PAK <span class="text-orange-500">PRO</span></h1>
+           <div class="space-y-4">
+             <input v-model="studio.userName" class="w-full bg-slate-900 border border-slate-800 text-white rounded-2xl px-6 py-4 font-bold outline-none ring-orange-500/20 focus:ring-4" />
+             <button @click="startStudio" class="w-full bg-orange-500 text-white font-black py-5 rounded-2xl shadow-xl shadow-orange-500/30 uppercase text-xs tracking-widest hover:bg-orange-600 transition-all">Entrar al Estudio</button>
+           </div>
+         </div>
+       </div>
     </div>
 
-    <!-- HEADER -->
-    <header class="h-14 border-b border-white/5 flex items-center justify-between px-6 bg-[#0f172a] shrink-0">
-      <div class="flex items-center gap-4">
-        <div class="w-8 h-8 bg-orange-500 rounded flex items-center justify-center font-bold text-white">CH</div>
-        <input class="bg-transparent border-none focus:ring-0 font-bold text-sm text-white" v-model="studio.streamTitle" />
-      </div>
-      <div class="flex items-center gap-3">
-        <div class="bg-red-600/10 text-red-500 px-3 py-1 rounded border border-red-500/20 text-[9px] font-bold uppercase tracking-tighter animate-pulse">Offline</div>
-        <button class="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-md font-bold text-[10px] uppercase shadow-lg">En Vivo</button>
-      </div>
-    </header>
+    <StudioHeader :is-streaming="isStreaming" @toggle-stream="toggleStreaming" />
 
-    <!-- MAIN BODY -->
-    <main class="flex-1 flex overflow-hidden">
-      <div class="flex-1 flex flex-col overflow-hidden relative">
+    <div class="flex-1 flex overflow-hidden">
+      <main class="flex-1 flex flex-col overflow-hidden bg-[#0f172a]">
         
-        <!-- NOTIFICATION -->
-        <Transition name="fade">
-          <div v-if="studio.guestConnected" class="absolute top-6 left-1/2 -translate-x-1/2 z-[150] bg-teal-500 text-white px-6 py-2 rounded-full shadow-2xl font-bold text-xs flex items-center gap-2">
-            <span class="w-2 h-2 bg-white rounded-full animate-ping"></span>
-            ¡Invitado Conectado!
-          </div>
-        </Transition>
-
-        <div v-if="isTunnelLoading" class="absolute inset-0 bg-slate-950/90 backdrop-blur-md z-[100] flex flex-col items-center justify-center text-center">
-          <div class="w-12 h-12 border-4 border-teal-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-          <h3 class="font-poppins text-lg font-bold text-teal-500">Abriendo túnel...</h3>
-        </div>
-
-        <!-- 2. EL ESCENARIO (EL CONTENEDOR QUE ESCALA) -->
-        <div class="flex-1 min-h-0 relative flex items-center justify-center bg-[#020617]">
-          <VideoCanvas />
-
-          <!-- Selector de Layouts Flotante -->
-          <div class="absolute bottom-10 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-md shadow-2xl rounded-2xl p-1.5 flex gap-1.5 z-50 text-slate-400">
-            <button @click="studio.setLayout('solo')" :class="[studio.layout === 'solo' ? 'ring-2 ring-orange-500 bg-orange-50 text-orange-600' : '']" class="w-11 h-11 flex items-center justify-center rounded-xl transition-all">
-              <div class="w-6 h-4 border-2 border-current rounded-sm"></div>
-            </button>
-            <button @click="studio.setLayout('grid')" :class="[studio.layout === 'grid' ? 'ring-2 ring-orange-500 bg-orange-50 text-orange-600' : '']" class="w-11 h-11 flex items-center justify-center rounded-xl transition-all">
-              <div class="w-6 h-4 flex"><div class="flex-1 border-2 border-current"></div><div class="flex-1 border-2 border-current border-l-0"></div></div>
-            </button>
-            <button @click="studio.setLayout('zoom')" :class="[studio.layout === 'zoom' ? 'ring-2 ring-teal-500 bg-teal-50 text-teal-600' : '']" class="w-11 h-11 flex items-center justify-center rounded-xl transition-all">
-              <div class="w-6 h-4 flex gap-1"><div class="flex-1 border-2 border-current rounded-[2px]"></div><div class="flex-1 border-2 border-current rounded-[2px]"></div></div>
-            </button>
-          </div>
-        </div>
-
-        <!-- 3. EL DOCK -->
-        <div class="h-28 flex gap-4 overflow-x-auto p-4 shrink-0 bg-[#0f172a]/50 border-t border-white/5">
-          <div :class="studio.isCamOn ? 'border-orange-500' : 'border-white/10'" class="min-w-[140px] bg-slate-800 rounded-xl border-2 relative overflow-hidden shadow-xl">
-            <div class="absolute bottom-0 left-0 right-0 bg-black/60 p-1.5 text-[8px] font-bold flex justify-between items-center">
-              <span class="truncate">{{ studio.userName }}</span>
-              <span class="text-orange-500 uppercase">Tú</span>
-            </div>
-          </div>
-
-          <div class="flex gap-3">
-            <button @click="studio.toggleScreenShare()" class="min-w-[100px] bg-slate-900/50 border-2 border-dashed border-white/10 rounded-xl flex flex-col items-center justify-center gap-1 hover:border-orange-500 transition-all text-slate-500 hover:text-orange-500">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-              <span class="text-[8px] font-bold uppercase">Presentar</span>
-            </button>
-            <button v-if="!isTunnelActive" @click="toggleTunnel" class="min-w-[100px] bg-slate-900/50 border-2 border-dashed border-white/10 rounded-xl flex flex-col items-center justify-center gap-1 hover:border-teal-500 transition-all text-slate-500 hover:text-teal-500">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
-              <span class="text-[8px] font-bold uppercase">Invitar</span>
-            </button>
-            <div v-if="isTunnelActive" class="min-w-[200px] bg-slate-900 border border-teal-500/30 rounded-xl flex p-2 gap-3 items-center">
-               <div class="flex-1 flex flex-col justify-between py-1 text-left">
-                  <span class="text-[7px] font-bold text-teal-500 uppercase tracking-tighter">Invitación</span>
-                  <button @click="toggleTunnel" class="bg-teal-600 text-white text-[8px] font-bold py-1 rounded">Copiar Link</button>
-               </div>
-               <div class="bg-white p-1 rounded-lg shrink-0"><QrcodeVue :value="guestLink" :size="45" /></div>
+        <!-- PROGRAM VIEW (Escenario) -->
+        <div class="flex-1 min-h-0 relative flex items-center justify-center bg-black overflow-hidden group">
+          <div class="w-full h-full relative flex items-center justify-center">
+            <VideoCanvas ref="videoCanvas" class="w-full h-full" />
+            
+            <!-- Layout Selector Flotante -->
+            <div class="absolute bottom-8 left-1/2 -translate-x-1/2 bg-slate-900/80 backdrop-blur-xl shadow-2xl rounded-2xl p-2 flex gap-1 z-40 border border-white/10 opacity-0 group-hover:opacity-100 transition-all">
+              <button v-for="l in ['solo', 'grid', 'sidebar', 'pip']" :key="l" @click="studio.layout = l" 
+                :class="[studio.layout === l ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'text-slate-400 hover:bg-white/5']"
+                class="px-4 h-9 flex items-center justify-center rounded-xl transition-all uppercase text-[9px] font-black tracking-widest"
+              >{{ l }}</button>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- SIDEBAR -->
-      <aside class="w-72 bg-[#0f172a] border-l border-white/5 shrink-0 p-5">
-        <h2 class="text-xs font-bold uppercase text-slate-400 mb-6 tracking-widest">Marca</h2>
-        <!-- Selector de Color Simple -->
-        <div class="space-y-2">
-          <p class="text-[9px] font-bold text-slate-500 uppercase">Color de Marca</p>
-          <input type="color" v-model="studio.brandColor" class="w-full h-8 bg-transparent border-none cursor-pointer" />
+        <!-- BACKSTAGE DOCK (Fuentes de Video) -->
+        <div class="h-40 bg-[#020617] border-t border-white/5 flex flex-col shadow-2xl">
+          <div class="px-8 py-2 border-b border-white/5 flex justify-between items-center">
+            <span class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Fuentes de Video</span>
+            <div class="flex gap-4">
+              <span class="text-[9px] font-bold text-orange-500 animate-pulse">{{ studio.guestConnected ? '1 Invitado Conectado' : 'Esperando Invitados' }}</span>
+            </div>
+          </div>
+          <div class="flex-1 flex gap-4 overflow-x-auto p-4 px-10 items-center scrollbar-hide">
+            <UserCameraCard 
+              id="local"
+              :stream="studio.localStream" 
+              :name="studio.userName" 
+              :is-local="true" 
+            />
+            
+            <UserCameraCard 
+              v-if="studio.guestConnected"
+              id="guest"
+              :stream="studio.guestStream"
+              :name="'Invitado'" 
+            />
+            
+            <div v-else class="min-w-[160px] aspect-video border-2 border-dashed border-white/5 rounded-xl flex flex-col items-center justify-center text-slate-600 gap-2 italic text-[10px] bg-white/[0.02] hover:bg-white/[0.04] transition-colors cursor-help">
+               <svg class="w-5 h-5 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" stroke-width="2"/></svg>
+               <span>Esperando invitado...</span>
+            </div>
+          </div>
         </div>
-      </aside>
-    </main>
+      </main>
 
-    <!-- FOOTER -->
-    <footer class="h-16 border-t border-white/5 bg-[#0f172a] flex items-center justify-center gap-6 px-6 shrink-0 shadow-2xl">
-      <button @click="studio.toggleMic()" :class="[studio.isMicOn ? 'bg-slate-800' : 'bg-red-500/20 text-red-500']" class="w-10 h-10 rounded-xl border border-white/5 flex items-center justify-center transition-all hover:scale-105"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg></button>
-      <button @click="studio.toggleCam()" :class="[studio.isCamOn ? 'bg-slate-800' : 'bg-red-500/20 text-red-500']" class="w-10 h-10 rounded-xl border border-white/5 flex items-center justify-center transition-all hover:scale-105"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button>
-      <div class="h-8 w-[1px] bg-white/10 mx-2"></div>
-      <button class="bg-[#1e293b] hover:bg-red-600 text-white px-8 py-2 rounded-lg font-bold text-[10px] uppercase shadow-lg transition-all active:scale-95">Abandonar</button>
-    </footer>
+      <StudioSidebar 
+        class="border-l border-white/5"
+        :is-tunnel-active="isTunnelActive" 
+        :guest-link="guestLink"
+        @toggle-tunnel="toggleTunnel" 
+        @start-record="videoCanvas.startRecording()"
+        @stop-record="videoCanvas.stopRecording()"
+      />
+    </div>
+
+    <StudioFooter />
+
+    <div v-if="isTunnelLoading" class="fixed inset-0 bg-black/90 backdrop-blur-xl z-[2000] flex flex-col items-center justify-center">
+      <div class="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-6"></div>
+      <p class="text-[10px] font-black text-white uppercase tracking-widest animate-pulse">Configurando Túnel Seguro...</p>
+    </div>
   </div>
 </template>
 
 <style>
-html, body, #app { height: 100%; margin: 0; padding: 0; overflow: hidden; background: #020617; font-family: 'Inter', sans-serif; }
-.fade-enter-active, .fade-leave-active { transition: opacity 0.5s; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&family=Bebas+Neue&family=Space+Grotesk:wght@400;700&family=Inter:wght@400;600;900&family=Montserrat:wght@400;700;900&display=swap');
+html, body, #app { height: 100%; margin: 0; padding: 0; overflow: hidden; background: white; font-family: 'Inter', sans-serif; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
 </style>

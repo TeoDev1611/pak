@@ -27,31 +27,39 @@ export const ToggleTunnel = async () => {
 };
 
 export const StartStream = async (rtmpUrl) => {
-    // Iniciar conexión WebSocket para el video
-    streamWs = new WebSocket(WS_URL);
-    streamWs.binaryType = "arraybuffer";
-    
-    streamWs.onopen = async () => {
-        console.log("WS Stream conectado");
-        await fetch(`${API_URL}/stream/start`, {
-            method: 'POST',
-            body: JSON.stringify({ url: rtmpUrl }),
-            headers: { 'Content-Type': 'application/json' }
-        });
-    };
+    await fetch(`${API_URL}/stream/start`, {
+        method: 'POST',
+        body: JSON.stringify({ url: rtmpUrl }),
+        headers: { 'Content-Type': 'application/json' }
+    });
 };
 
 export const StopStream = async () => {
-    if (streamWs) {
-        streamWs.close();
-        streamWs = null;
-    }
     await fetch(`${API_URL}/stream/stop`, { method: 'POST' });
 };
 
-export const PushVideoChunk = (chunk) => {
-    // chunk es un Array (viene de App.vue), convertir a Uint8Array
-    if (streamWs && streamWs.readyState === WebSocket.OPEN) {
-        streamWs.send(new Uint8Array(chunk));
+export const StartRecording = async (filename) => {
+    await fetch(`${API_URL}/stream/record/start`, {
+        method: 'POST',
+        body: JSON.stringify({ filename }),
+        headers: { 'Content-Type': 'application/json' }
+    });
+};
+
+export const StopRecording = async () => {
+    await fetch(`${API_URL}/stream/record/stop`, { method: 'POST' });
+};
+
+export const SendOffer = async (sdp) => {
+    try {
+        const res = await fetch(`${API_URL}/stream/offer`, {
+            method: 'POST',
+            body: JSON.stringify({ sdp }),
+            headers: { 'Content-Type': 'application/json' }
+        });
+        return await res.json();
+    } catch (e) {
+        console.error("Error sending offer:", e);
+        return null;
     }
 };

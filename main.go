@@ -24,10 +24,15 @@ func main() {
 	mux.HandleFunc("/api/tunnel", handleTunnel)
 	mux.HandleFunc("/api/stream/start", handleStartStream)
 	mux.HandleFunc("/api/stream/stop", handleStopStream)
+	mux.HandleFunc("/api/stream/record/start", handleStartRecord)
+	mux.HandleFunc("/api/stream/record/stop", handleStopRecord)
+	mux.HandleFunc("/api/stream/offer", handleOffer)
+	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
 
 	signaling := NewSignalingServer()
 	mux.HandleFunc("/ws", signaling.HandleConnections)
-    mux.HandleFunc("/stream-ws", handleStreamWS)
 
 	distFS, _ := fs.Sub(assets, "frontend/dist")
 	fileServer := http.FileServer(http.FS(distFS))
@@ -84,14 +89,30 @@ func handleStopStream(w http.ResponseWriter, r *http.Request) {
     app.StopStream()
     w.WriteHeader(200)
 }
-func handleStreamWS(w http.ResponseWriter, r *http.Request) {
-    conn, err := upgrader.Upgrade(w, r, nil)
-    if err != nil { return }
-    defer conn.Close()
-    for {
-        _, message, err := conn.ReadMessage()
-        if err != nil { break }
-        app.PushVideoChunk(message)
+func handleOffer(w http.ResponseWriter, r *http.Request) {
+    var req map[string]string
+    json.NewDecoder(r.Body).Decode(&req)
+    
+    answer, err := app.ProcessStudioOffer(req["sdp"])
+    if err != nil {
+        http.Error(w, err.Error(), 500)
+        return
     }
+    
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]string{"sdp": answer})
+}
+func handleStartRecord(w http.ResponseWriter, r *http.Request) {
+    var req struct { Filename string `json:"filename"` }
+    json.NewDecoder(r.Body).Decode(&req)
+    if err := app.StartRecording(req.Filename); err != nil {
+        http.Error(w, err.Error(), 500)
+        return
+    }
+    w.WriteHeader(200)
+}
+func handleStopRecord(w http.ResponseWriter, r *http.Request) {
+    app.StopRecording()
+    w.WriteHeader(200)
 }
 type StreamReq struct { Url string `json:"url"` }

@@ -1,7 +1,7 @@
-# GEMINI.md - Project Context: Chasqui
+# GEMINI.md - Project Context: PAK
 
 ## Project Overview
-**Chasqui** is a "Mini StreamYard Local" desktop application. It is designed to function as a local TV studio where the heavy lifting of visual rendering is handled by the frontend, and the backend serves as a lightweight process manager.
+**PAK** is a "Mini StreamYard Local" desktop application. It is designed to function as a local TV studio where the heavy lifting of visual rendering is handled by the frontend, and the backend serves as a lightweight process manager.
 
 - **Primary Goal:** Provide a local streaming studio with support for guests via WebRTC and broadcasting via FFmpeg.
 - **Core Technologies:** 

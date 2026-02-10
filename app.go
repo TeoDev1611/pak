@@ -5,22 +5,34 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
+
+	"gphr/internal/adapters"
+
+	"github.com/pion/webrtc/v3"
 )
 
 // App struct
 type App struct {
-	ctx         context.Context
-	ffmpegCmd   *exec.Cmd
-	ffmpegIn    io.WriteCloser
-	isStreaming bool
-	tunnelCmd   *exec.Cmd
+	ctx           context.Context
+	ffmpegCmd     *exec.Cmd
+	recordCmd     *exec.Cmd // Commando separado para grabación
+	ffmpegIn      io.WriteCloser
+	isStreaming   bool
+	isRecording   bool
+	tunnelCmd     *exec.Cmd
+	webrtcAdapter *adapters.WebRTCAdapter
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	return &App{}
+	adapter, _ := adapters.NewWebRTCAdapter()
+	return &App{
+		webrtcAdapter: adapter,
+	}
 }
 
 // startup is called when the app starts. The context is saved
@@ -39,10 +51,10 @@ func (a *App) ToggleTunnel() (string, error) {
 		return "", nil
 	}
 
-	fmt.Println("ToggleTunnel: Ejecutando comando SSH...")
+	fmt.Println("ToggleTunnel: Ejecutando commando SSH...")
 	// -T deshabilita la asignación de terminal, -o para ignorar hosts desconocidos
 	a.tunnelCmd = exec.Command("ssh", "-T", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-R", "80:localhost:8080", "nokey@localhost.run")
-	
+
 	stdout, err := a.tunnelCmd.StdoutPipe()
 	if err != nil {
 		return "", err
@@ -63,8 +75,8 @@ func (a *App) ToggleTunnel() (string, error) {
 				break
 			}
 			fullOutput += string(buf[:n])
-			// Si ya tenemos la URL, no hace falta leer más para la activación
-			if (1 > 0) { // Placeholder para lógica de detección
+			// Si ya tenemos la URL, no have falta leer más para la activación
+			if 1 > 0 { // Placeholder para lógica de detección
 				if len(fullOutput) > 50 && (contains(fullOutput, ".lhr.life") || contains(fullOutput, ".lhr.pro")) {
 					break
 				}
@@ -103,33 +115,141 @@ func (a *App) GetLocalIP() string {
 	return "127.0.0.1"
 }
 
-// StartStream inicia el proceso de FFmpeg preparado para recibir video por stdin
+// ProcessStudioOffer recibe la oferta SDP del frontend y devuelve la respuesta
+func (a *App) ProcessStudioOffer(sdp string) (string, error) {
+	fmt.Println("Recibiendo oferta WebRTC del Canvas...")
+
+	return a.webrtcAdapter.ProcessOffer(sdp, func(track *webrtc.TrackRemote) {
+		// Reenviamos a dos puertos: 5004 (Stream) y 5005 (Record)
+		go func() {
+			connStream, _ := net.Dial("udp", "127.0.0.1:5004")
+			connRecord, _ := net.Dial("udp", "127.0.0.1:5005")
+			defer func() {
+				if connStream != nil { connStream.Close() }
+				if connRecord != nil { connRecord.Close() }
+			}()
+
+			buf := make([]byte, 1500)
+			for {
+				n, _, err := track.Read(buf)
+				if err != nil {
+					return
+				}
+				if connStream != nil { connStream.Write(buf[:n]) }
+				if connRecord != nil { connRecord.Write(buf[:n]) }
+			}
+		}()
+	})
+}
+
+// StartRecording inicia la grabación local con FFmpeg
+func (a *App) StartRecording(filename string) error {
+	if a.isRecording {
+		return fmt.Errorf("ya se está grabando")
+	}
+
+	// Asegurar carpetas
+	os.MkdirAll("recordings", 0755)
+	os.MkdirAll("logs", 0755)
+
+	fullPath, _ := filepath.Abs(filepath.Join("recordings", filename))
+	logPath, _ := filepath.Abs(filepath.Join("logs", "ffmpeg_record.log"))
+	
+	fmt.Printf("Backend: Grabando en %s\n", fullPath)
+
+	// Crear archivo SDP temporal
+	sdpContent := "v=0\no=- 0 0 IN IP4 127.0.0.1\ns=PAK\nc=IN IP4 127.0.0.1\nt=0 0\nm=video 5005 RTP/AVP 96\na=rtpmap:96 H264/90000"
+	sdpPath := filepath.Join(os.TempDir(), "pak_record.sdp")
+	os.WriteFile(sdpPath, []byte(sdpContent), 0644)
+
+	// Pequeña espera para que el stream RTP se estabilice
+	time.Sleep(1 * time.Second)
+
+	args := []string{
+		"-protocol_whitelist", "file,rtp,udp",
+		"-i", sdpPath, 
+		"-c:v", "libx264",            
+		"-preset", "veryfast",       
+		"-crf", "20",                 
+		"-pix_fmt", "yuv420p",        
+		"-s", "1920x1080",            
+		"-y",                         
+		fullPath,
+	}
+
+	a.recordCmd = exec.Command("ffmpeg", args...)
+	
+	// Redirigir errores a un log para inspección
+	logFile, _ := os.Create(logPath)
+	a.recordCmd.Stderr = logFile
+
+	if err := a.recordCmd.Start(); err != nil {
+		fmt.Printf("Error FFmpeg Start: %v\n", err)
+		return err
+	}
+
+	a.isRecording = true
+	return nil
+}
+
+// StopRecording detiene la grabación local
+func (a *App) StopRecording() {
+	if !a.isRecording {
+		return
+	}
+	a.isRecording = false
+	if a.recordCmd != nil && a.recordCmd.Process != nil {
+		// Enviar señal de interrupción para cerrar el archivo MP4 correctamente
+		a.recordCmd.Process.Signal(os.Interrupt)
+
+		// Esperar un memento para que FFmpeg cierre el contenedor
+		go func() {
+			time.Sleep(1 * time.Second)
+			if a.recordCmd.ProcessState == nil || !a.recordCmd.ProcessState.Exited() {
+				a.recordCmd.Process.Kill()
+			}
+			fmt.Println("Grabación finalizada y guardada.")
+		}()
+	}
+}
+
+// StartStream inicia el proceso de FFmpeg escuchando en el puerto UDP
 func (a *App) StartStream(rtmpURL string) error {
 	if a.isStreaming {
 		return fmt.Errorf("ya hay un stream activo")
 	}
 
-	// Comandos de FFmpeg para recibir WebM/VP8 (de MediaRecorder) y convertir a RTMP/H264
-	// Ajustamos para que lea de 'stdin' y emita a la URL proporcionada
+	os.MkdirAll("logs", 0755)
+	logPath, _ := filepath.Abs(filepath.Join("logs", "ffmpeg_stream.log"))
+
+	// Crear archivo SDP temporal para el stream
+	sdpContent := "v=0\no=- 0 0 IN IP4 127.0.0.1\ns=PAKStream\nc=IN IP4 127.0.0.1\nt=0 0\nm=video 5004 RTP/AVP 96\na=rtpmap:96 H264/90000"
+	sdpPath := filepath.Join(os.TempDir(), "pak_stream.sdp")
+	os.WriteFile(sdpPath, []byte(sdpContent), 0644)
+
+	// Esperar a que WebRTC envíe los primeros paquetes
+	time.Sleep(1 * time.Second)
+
+	// Commandos de FFmpeg para recibir RTP por UDP y emitir a RTMP
 	args := []string{
-		"-i", "pipe:0",           // Lee de stdin
-		"-c:v", "libx264",        // Convierte a H.264
-		"-preset", "veryfast",    // Rapidez sobre compresión
-		"-maxrate", "3000k",      // Bitrate máximo
+		"-protocol_whitelist", "file,rtp,udp",
+		"-i", sdpPath,
+		"-c:v", "libx264",
+		"-preset", "ultrafast", 
+		"-tune", "zerolatency", 
+		"-maxrate", "3000k",
 		"-bufsize", "6000k",
-		"-pix_fmt", "yuv420p",    // Formato compatible con YouTube/Twitch
-		"-g", "60",               // Keyframes cada 2 segundos (a 30fps)
-		"-f", "flv",              // Formato para RTMP
+		"-pix_fmt", "yuv420p",
+		"-g", "60",
+		"-threads", "0", 
+		"-f", "flv",
 		rtmpURL,
 	}
 
 	a.ffmpegCmd = exec.Command("ffmpeg", args...)
-
-	var err error
-	a.ffmpegIn, err = a.ffmpegCmd.StdinPipe()
-	if err != nil {
-		return err
-	}
+	
+	logFile, _ := os.Create(logPath)
+	a.ffmpegCmd.Stderr = logFile
 
 	if err := a.ffmpegCmd.Start(); err != nil {
 		return err
@@ -140,31 +260,16 @@ func (a *App) StartStream(rtmpURL string) error {
 	return nil
 }
 
-// PushVideoChunk recibe un trozo de video del frontend y lo escribe en FFmpeg
-func (a *App) PushVideoChunk(data []byte) {
-	if a.isStreaming && a.ffmpegIn != nil {
-		_, err := a.ffmpegIn.Write(data)
-		if err != nil {
-			fmt.Println("Error escribiendo a FFmpeg:", err)
-			a.StopStream()
-		}
-	}
-}
-
 func (a *App) StopStream() {
 	if !a.isStreaming {
 		return
 	}
 	a.isStreaming = false
-	if a.ffmpegIn != nil {
-		a.ffmpegIn.Close()
-	}
-	if a.ffmpegCmd != nil {
+	if a.ffmpegCmd != nil && a.ffmpegCmd.Process != nil {
 		a.ffmpegCmd.Process.Kill()
 	}
 	fmt.Println("FFmpeg: Proceso detenido")
 }
-
 
 // CheckDependencies checks if the required binaries are installed
 func (a *App) CheckDependencies() map[string]bool {
