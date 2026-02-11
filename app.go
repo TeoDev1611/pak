@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gphr/internal/adapters"
@@ -25,6 +26,9 @@ type App struct {
 	isRecording   bool
 	tunnelCmd     *exec.Cmd
 	webrtcAdapter *adapters.WebRTCAdapter
+	rtpSignal     chan bool // Canal para avisar que hay datos fluyendo
+	videoTrack    *webrtc.TrackRemote
+	hasRTP        bool // Estado de si estamos recibiendo RTP
 }
 
 // NewApp creates a new App application struct
@@ -32,6 +36,7 @@ func NewApp() *App {
 	adapter, _ := adapters.NewWebRTCAdapter()
 	return &App{
 		webrtcAdapter: adapter,
+		rtpSignal:     make(chan bool, 10), // Aumentamos buffer
 	}
 }
 
@@ -120,23 +125,46 @@ func (a *App) ProcessStudioOffer(sdp string) (string, error) {
 	fmt.Println("Recibiendo oferta WebRTC del Canvas...")
 
 	return a.webrtcAdapter.ProcessOffer(sdp, func(track *webrtc.TrackRemote) {
+		a.videoTrack = track
 		// Reenviamos a dos puertos: 5004 (Stream) y 5005 (Record)
 		go func() {
 			connStream, _ := net.Dial("udp", "127.0.0.1:5004")
 			connRecord, _ := net.Dial("udp", "127.0.0.1:5005")
 			defer func() {
-				if connStream != nil { connStream.Close() }
-				if connRecord != nil { connRecord.Close() }
+				if connStream != nil {
+					connStream.Close()
+				}
+				if connRecord != nil {
+					connRecord.Close()
+				}
 			}()
 
 			buf := make([]byte, 1500)
 			for {
 				n, _, err := track.Read(buf)
 				if err != nil {
+					a.hasRTP = false
 					return
 				}
-				if connStream != nil { connStream.Write(buf[:n]) }
-				if connRecord != nil { connRecord.Write(buf[:n]) }
+
+				if n > 0 {
+					if !a.hasRTP {
+						a.hasRTP = true
+						fmt.Println("Backend: ¡Primer paquete RTP recibido!")
+					}
+					// Notificamos que hay datos
+					select {
+					case a.rtpSignal <- true:
+					default:
+					}
+
+					if connStream != nil {
+						connStream.Write(buf[:n])
+					}
+					if connRecord != nil {
+						connRecord.Write(buf[:n])
+					}
+				}
 			}
 		}()
 	})
@@ -149,66 +177,120 @@ func (a *App) StartRecording(filename string) error {
 	}
 
 	// Asegurar carpetas
-	os.MkdirAll("recordings", 0755)
-	os.MkdirAll("logs", 0755)
+	os.MkdirAll("recordings", 0o755)
+	os.MkdirAll("logs", 0o755)
 
-	fullPath, _ := filepath.Abs(filepath.Join("recordings", filename))
+	// Añadir timestamp para evitar sobrescritura
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	ext := filepath.Ext(filename)
+	base := strings.TrimSuffix(filename, ext)
+	if base == "" {
+		base = "grabacion"
+	}
+	finalName := fmt.Sprintf("%s_%s%s", base, timestamp, ".mp4")
+
+	fullPath, _ := filepath.Abs(filepath.Join("recordings", finalName))
 	logPath, _ := filepath.Abs(filepath.Join("logs", "ffmpeg_record.log"))
-	
-	fmt.Printf("Backend: Grabando en %s\n", fullPath)
 
-	// Crear archivo SDP temporal
+	fmt.Printf("Backend: Iniciando grabación en %s\n", fullPath)
+
+	// 1. SOLICITAR KEYFRAME (PLI) INMEDIATAMENTE
+	if a.videoTrack != nil {
+		fmt.Println("Backend: Solicitando Keyframe (PLI) para sincronizar grabación...")
+		a.webrtcAdapter.RequestKeyframe(uint32(a.videoTrack.SSRC()))
+	}
+
+	// Crear archivo SDP temporal simplificado
 	sdpContent := "v=0\no=- 0 0 IN IP4 127.0.0.1\ns=PAK\nc=IN IP4 127.0.0.1\nt=0 0\nm=video 5005 RTP/AVP 96\na=rtpmap:96 H264/90000"
 	sdpPath := filepath.Join(os.TempDir(), "pak_record.sdp")
-	os.WriteFile(sdpPath, []byte(sdpContent), 0644)
+	os.WriteFile(sdpPath, []byte(sdpContent), 0o644)
 
-	// Pequeña espera para que el stream RTP se estabilice
-	time.Sleep(1 * time.Second)
-
+	// 2. ARGUMENTOS LIMPIOS (Sin -s que falla en SDP demuxer)
 	args := []string{
-		"-protocol_whitelist", "file,rtp,udp",
-		"-i", sdpPath, 
-		"-c:v", "libx264",            
-		"-preset", "veryfast",       
-		"-crf", "20",                 
-		"-pix_fmt", "yuv420p",        
-		"-s", "1920x1080",            
-		"-y",                         
+		"-y",
+		"-protocol_whitelist", "file,udp,rtp",
+		"-f", "sdp",
+		"-i", sdpPath,
+		"-c:v", "libx264",
+		"-preset", "ultrafast",
+		"-crf", "22",
+		"-pix_fmt", "yuv420p",
+		"-movflags", "+faststart",
 		fullPath,
 	}
 
 	a.recordCmd = exec.Command("ffmpeg", args...)
-	
-	// Redirigir errores a un log para inspección
-	logFile, _ := os.Create(logPath)
-	a.recordCmd.Stderr = logFile
+	stderr, _ := a.recordCmd.StderrPipe()
 
-	if err := a.recordCmd.Start(); err != nil {
-		fmt.Printf("Error FFmpeg Start: %v\n", err)
-		return err
-	}
+	// 3. LÓGICA DE ESPERA (PERMISIVA)
+	go func() {
+		fmt.Println("Backend: Preparando flujo para FFmpeg...")
+		
+		// Intentamos pedir keyframe
+		if a.videoTrack != nil {
+			a.webrtcAdapter.RequestKeyframe(uint32(a.videoTrack.SSRC()))
+		}
 
-	a.isRecording = true
+		// Espera mínima para que el PLI surta efecto, pero sin abortar
+		select {
+		case <-a.rtpSignal:
+			fmt.Println("Backend: ¡Datos RTP detectados!")
+		case <-time.After(1500 * time.Millisecond):
+			fmt.Println("Backend: Iniciando FFmpeg preventivamente (sin esperar señal)...")
+		}
+
+		if err := a.recordCmd.Start(); err != nil {
+			fmt.Printf("Error crítico FFmpeg Start: %v\n", err)
+			return
+		}
+		a.isRecording = true
+
+		// Logs y Wait
+		go func() {
+			slurp, _ := io.ReadAll(stderr)
+			if len(slurp) > 0 {
+				os.WriteFile(logPath, slurp, 0o644)
+			}
+		}()
+
+		err := a.recordCmd.Wait()
+		a.isRecording = false
+
+		// Verificación final
+		time.Sleep(500 * time.Millisecond)
+		if info, statErr := os.Stat(fullPath); statErr == nil {
+			fmt.Printf("✅ ÉXITO: Grabación finalizada. %s (%.2f MB)\n", info.Name(), float64(info.Size())/1024/1024)
+		} else {
+			fmt.Printf("❌ ERROR: El archivo no se generó.\n")
+		}
+
+		if err != nil {
+			fmt.Printf("Backend: FFmpeg terminó con error: %v\n", err)
+		}
+	}()
+
 	return nil
 }
 
-// StopRecording detiene la grabación local
+// StopRecording detiene la grabación local enviando señal de interrupción
 func (a *App) StopRecording() {
 	if !a.isRecording {
 		return
 	}
-	a.isRecording = false
+
 	if a.recordCmd != nil && a.recordCmd.Process != nil {
-		// Enviar señal de interrupción para cerrar el archivo MP4 correctamente
+		fmt.Println("Backend: Enviando señal Interrupt a FFmpeg...")
+		// Enviar señal de interrupción para cerrar el archivo MP4 correctamente (átomo 'moov')
 		a.recordCmd.Process.Signal(os.Interrupt)
 
-		// Esperar un memento para que FFmpeg cierre el contenedor
+		// Damos un tiempo a que FFmpeg cierre elegantemente antes de forzar
 		go func() {
-			time.Sleep(1 * time.Second)
-			if a.recordCmd.ProcessState == nil || !a.recordCmd.ProcessState.Exited() {
+			time.Sleep(2 * time.Second)
+			if a.isRecording {
+				fmt.Println("Backend: FFmpeg no cerró a tiempo, forzando Kill...")
 				a.recordCmd.Process.Kill()
+				a.isRecording = false
 			}
-			fmt.Println("Grabación finalizada y guardada.")
 		}()
 	}
 }
@@ -219,13 +301,13 @@ func (a *App) StartStream(rtmpURL string) error {
 		return fmt.Errorf("ya hay un stream activo")
 	}
 
-	os.MkdirAll("logs", 0755)
+	os.MkdirAll("logs", 0o755)
 	logPath, _ := filepath.Abs(filepath.Join("logs", "ffmpeg_stream.log"))
 
 	// Crear archivo SDP temporal para el stream
 	sdpContent := "v=0\no=- 0 0 IN IP4 127.0.0.1\ns=PAKStream\nc=IN IP4 127.0.0.1\nt=0 0\nm=video 5004 RTP/AVP 96\na=rtpmap:96 H264/90000"
 	sdpPath := filepath.Join(os.TempDir(), "pak_stream.sdp")
-	os.WriteFile(sdpPath, []byte(sdpContent), 0644)
+	os.WriteFile(sdpPath, []byte(sdpContent), 0o644)
 
 	// Esperar a que WebRTC envíe los primeros paquetes
 	time.Sleep(1 * time.Second)
@@ -235,19 +317,19 @@ func (a *App) StartStream(rtmpURL string) error {
 		"-protocol_whitelist", "file,rtp,udp",
 		"-i", sdpPath,
 		"-c:v", "libx264",
-		"-preset", "ultrafast", 
-		"-tune", "zerolatency", 
+		"-preset", "ultrafast",
+		"-tune", "zerolatency",
 		"-maxrate", "3000k",
 		"-bufsize", "6000k",
 		"-pix_fmt", "yuv420p",
 		"-g", "60",
-		"-threads", "0", 
+		"-threads", "0",
 		"-f", "flv",
 		rtmpURL,
 	}
 
 	a.ffmpegCmd = exec.Command("ffmpeg", args...)
-	
+
 	logFile, _ := os.Create(logPath)
 	a.ffmpegCmd.Stderr = logFile
 

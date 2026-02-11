@@ -3,12 +3,23 @@ package adapters
 import (
 	"fmt"
 
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v3"
 )
 
 type WebRTCAdapter struct {
 	peerConnection *webrtc.PeerConnection
 	onTrack        func(track *webrtc.TrackRemote)
+}
+
+func (a *WebRTCAdapter) RequestKeyframe(ssrc uint32) {
+	if a.peerConnection == nil {
+		return
+	}
+	fmt.Printf("Backend: Solicitando Keyframe (PLI) para SSRC %d...\n", ssrc)
+	a.peerConnection.WriteRTCP([]rtcp.Packet{
+		&rtcp.PictureLossIndication{MediaSSRC: ssrc},
+	})
 }
 
 func NewWebRTCAdapter() (*WebRTCAdapter, error) {

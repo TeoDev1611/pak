@@ -30,6 +30,8 @@ Este documento define la nueva estrategia técnica para eliminar el lag, arregla
 ## 🚀 Fase 5: Transmisión (Backend)
 **Objetivo:** Enviar la señal final.
 *   [ ] **Captura de Canvas:** Usar `canvas.captureStream()` del canvas oculto.
+*   [x] **Fix Ghosting:** Eliminadas transiciones CSS en banners (instantáneo).
+*   [ ] **Grabación Robusta:** Sincronización de Keyframes (SPS/PPS) en grabaciones iniciadas post-stream (Pendiente).
 *   [ ] **Pipe a Go:** Conectar el stream capturado con el proceso FFmpeg en el backend.
 
 ---

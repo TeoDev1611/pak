@@ -3,8 +3,9 @@ import { defineStore } from 'pinia';
 export const useStudioStore = defineStore('studio', {
   state: () => ({
     isInitialized: false,
-    layout: 'grid', // solo, grid, sidebar, pip
-    userName: 'Anfitrión',
+    layout: 'grid', 
+    userName: localStorage.getItem('user_name') || 'Anfitrión',
+    streamTitle: 'Mi Transmisión',
     
     // Streams
     localStream: null,
@@ -15,29 +16,42 @@ export const useStudioStore = defineStore('studio', {
     isCamOn: true,
     isMicOn: true,
     
+    // Mezcla de Audio
+    audioContext: null,
+    audioDestination: null,
+    localAudioSource: null,
+    guestAudioSource: null,
+    
     // Inventario de Dispositivos
     videoDevices: [],
     audioDevices: [],
     currentVideoDeviceId: localStorage.getItem('lastVideoDevice') || undefined,
     currentAudioDeviceId: localStorage.getItem('lastAudioDevice') || undefined,
     
-    // Estética
+    // Estética Industrial
     brandColor: '#f97316',
     logoUrl: null,
     logoScale: 0.15,
+    logoPosition: 'top-right', // 'top-left', 'top-right', 'bottom-left', 'bottom-right'
     backgroundUrl: null,
-    bannerStyle: 'modern', // modern, classic, neon, minimal
-    bannerFont: 'Outfit',   // Outfit, Bebas Neue, Space Grotesk, Inter, Mono
-    bannerY: 590,          // Posición vertical del banner
-    bannerX: 240,          // Posición horizontal
+    bannerFont: 'Inter', // 'Inter', 'Roboto', 'Oswald', 'Courier Prime'
+    bannerY: 590,          
+    bannerX: 240,          
+    bannerPositionX: 50,
+    bannerPositionY: 85,
+    bannerBgColor: '#f97316',
+    bannerTextColor: '#ffffff',
+    bannerBorderRadius: 4,
+    bannerPadding: 20,
     showParticipantNames: true,
     showLiveBadge: true,
     recordingTitle: 'Grabacion-PAK',
     isRecording: false,
+    rtmpUrl: 'rtmp://localhost/live/stream',
     
-    // Banners (Lower Thirds)
+    // Banners
     banners: JSON.parse(localStorage.getItem('studio_banners')) || [
-      { id: 1, text: '¡Bienvenidos a PAK STUDIO!', subtext: 'Transmisión en vivo', active: false, isTicker: false }
+      { id: 1, text: '¡BIENVENIDOS A CHASQUI!', subtext: 'PRO STUDIO', active: false, isTicker: false, style: 'modern', isMarquee: false }
     ],
     
     // Gestión del Escenario
@@ -45,8 +59,19 @@ export const useStudioStore = defineStore('studio', {
   }),
 
   actions: {
-    addBanner(text, subtext, isTicker = false) {
-      this.banners.push({ id: Date.now(), text, subtext, active: false, isTicker });
+    addBanner(text, subtext, isTicker = false, style = 'custom', isMarquee = false) {
+      this.banners.push({ 
+        id: Date.now(), 
+        text, 
+        subtext, 
+        active: false, 
+        isTicker, 
+        style, 
+        isMarquee,
+        bgColor: this.bannerBgColor,
+        textColor: this.bannerTextColor,
+        borderRadius: this.bannerBorderRadius
+      });
       this.saveBanners();
     },
     toggleBanner(id) {
@@ -65,6 +90,7 @@ export const useStudioStore = defineStore('studio', {
     },
     setLogo(url) { this.logoUrl = url; },
     setBackground(url) { this.backgroundUrl = url; },
+    
     toggleParticipant(id) {
       if (this.participantsOnStage.includes(id)) {
         this.participantsOnStage = this.participantsOnStage.filter(p => p !== id);
@@ -72,73 +98,68 @@ export const useStudioStore = defineStore('studio', {
         this.participantsOnStage.push(id);
       }
     },
+
     async fetchDevices() {
       try {
         const devices = await navigator.mediaDevices.enumerateDevices();
         this.videoDevices = devices.filter(d => d.kind === 'videoinput');
         this.audioDevices = devices.filter(d => d.kind === 'audioinput');
-      } catch (e) {
-        console.error("Error listando dispositivos:", e);
-      }
+      } catch (e) { console.error(e); }
     },
 
-    async initLocalStream(vDeviceId = this.currentVideoDeviceId, aDeviceId = this.currentAudioDeviceId) {
+    // ROBUSTEZ DE CÁMARA (Waterfall Fallback)
+    async initLocalStream() {
       if (this.localStream) {
         this.localStream.getTracks().forEach(track => track.stop());
       }
 
-      // Intentar primero con calidad ideal, luego fallback a básico
       const configs = [
-        {
-          audio: aDeviceId ? { deviceId: { ideal: aDeviceId } } : true,
-          video: {
-            deviceId: vDeviceId ? { ideal: vDeviceId } : undefined,
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            frameRate: { ideal: 30 }
-          }
-        },
+        { video: { width: 1920, height: 1080 }, audio: true },
+        { video: { width: 1280, height: 720 }, audio: true },
         { video: true, audio: true }
       ];
 
       for (const constraints of configs) {
         try {
-          console.log("Admin: Intentando capturar con:", constraints);
           const stream = await navigator.mediaDevices.getUserMedia(constraints);
-          
-          const vTrack = stream.getVideoTracks()[0];
-          const aTrack = stream.getAudioTracks()[0];
-          
-          if (vTrack) {
-            this.currentVideoDeviceId = vTrack.getSettings().deviceId;
-            localStorage.setItem('lastVideoDevice', this.currentVideoDeviceId);
-          }
-          if (aTrack) {
-            this.currentAudioDeviceId = aTrack.getSettings().deviceId;
-            localStorage.setItem('lastAudioDevice', this.currentAudioDeviceId);
-          }
-
           this.localStream = stream;
           this.isInitialized = true;
           
-          // Auto-subir al escenario si está vacío
           if (this.participantsOnStage.length === 0) {
             this.participantsOnStage.push('local');
           }
 
+          this.setupAudioMixing(stream);
           this.applyMediaStates();
-          
-          if (this.videoDevices.length === 0) await this.fetchDevices();
-          console.log("Admin: Cámara iniciada con éxito");
           return stream;
         } catch (e) {
-          console.warn("Admin: Fallo en intento de cámara:", e);
+          console.warn("Intento de cámara fallido:", e.name);
         }
       }
-
-      this.isInitialized = false; // Asegurar que no pasamos si falla todo
-      alert("No se pudo acceder a la cámara del Admin. Revisa los permisos.");
+      alert("No se pudo acceder a la cámara.");
       throw new Error("Cámara no disponible");
+    },
+
+    // IMPLEMENTAR MEZCLA DE AUDIO
+    setupAudioMixing(localStream) {
+      if (!this.audioContext) {
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        this.audioDestination = this.audioContext.createMediaStreamDestination();
+      }
+
+      if (this.localAudioSource) this.localAudioSource.disconnect();
+      if (localStream.getAudioTracks().length > 0) {
+        this.localAudioSource = this.audioContext.createMediaStreamSource(localStream);
+        this.localAudioSource.connect(this.audioDestination);
+      }
+    },
+
+    mixGuestAudio(guestStream) {
+      if (this.audioContext && guestStream.getAudioTracks().length > 0) {
+        if (this.guestAudioSource) this.guestAudioSource.disconnect();
+        this.guestAudioSource = this.audioContext.createMediaStreamSource(guestStream);
+        this.guestAudioSource.connect(this.audioDestination);
+      }
     },
 
     toggleCam() {
@@ -158,8 +179,6 @@ export const useStudioStore = defineStore('studio', {
       }
     },
 
-    setLayout(l) {
-      this.layout = l;
-    }
+    setLayout(l) { this.layout = l; }
   }
 });

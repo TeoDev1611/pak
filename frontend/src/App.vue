@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, watch, computed } from 'vue';
 import * as AppGo from './services/api.js';
 import { useStudioStore } from './stores/studio';
 
@@ -9,6 +9,7 @@ import StudioHeader from './components/StudioHeader.vue';
 import StudioSidebar from './components/StudioSidebar.vue';
 import StudioFooter from './components/StudioFooter.vue';
 import UserCameraCard from './components/UserCameraCard.vue';
+import QrcodeVue from 'qrcode.vue';
 
 const studio = useStudioStore();
 const videoCanvas = ref(null);
@@ -17,9 +18,40 @@ const isTunnelActive = ref(false);
 const isTunnelLoading = ref(false);
 const guestLink = ref('');
 const isStreaming = ref(false);
+const showInviteModal = ref(false);
+const copyNotification = ref(false);
+
+// LÓGICA DE BANNERS (OVERLAY HTML)
+const activeBanner = computed(() => studio.banners.find(b => b.active));
+
+const bannerClasses = computed(() => {
+  if (!activeBanner.value) return "";
+  return "absolute px-8 py-4 z-30 flex flex-col items-center justify-center text-center max-w-[90%] pointer-events-none select-none shadow-2xl overflow-hidden";
+});
+
+const bannerPositionStyle = computed(() => {
+    if (!activeBanner.value) return {};
+    const b = activeBanner.value;
+    return {
+        left: studio.bannerPositionX + '%',
+        top: studio.bannerPositionY + '%',
+        transform: 'translate(-50%, -50%)',
+        backgroundColor: b.bgColor || studio.bannerBgColor,
+        color: b.textColor || studio.bannerTextColor,
+        borderRadius: (b.borderRadius ?? studio.bannerBorderRadius) + 'px',
+        fontFamily: studio.bannerFont,
+        border: `1px solid rgba(255,255,255,0.1)`
+    }
+});
 
 const startStudio = async () => {
   await studio.initLocalStream();
+};
+
+const copyLink = () => {
+  navigator.clipboard.writeText(guestLink.value || `http://${window.location.hostname}:8080/invitado`);
+  copyNotification.value = true;
+  setTimeout(() => copyNotification.value = false, 2000);
 };
 
 const toggleStreaming = async () => {
@@ -62,19 +94,33 @@ onMounted(() => { studio.initLocalStream(); });
 </script>
 
 <template>
-  <div class="flex flex-col h-screen bg-[#020617] text-slate-200 overflow-hidden font-sans select-none">
+  <div class="flex flex-col h-screen bg-black text-white font-sans antialiased selection:bg-orange-500 selection:text-white">
     
-    <!-- LOBBY -->
-    <div v-if="!studio.isInitialized" class="fixed inset-0 z-[1000] bg-[#020617] flex flex-col items-center justify-center p-6 text-center">
+    <!-- LOBBY (Minimalista) -->
+    <div v-if="!studio.isInitialized" class="fixed inset-0 z-[1000] bg-black flex flex-col items-center justify-center p-6 text-center">
        <div class="flex flex-col md:flex-row gap-12 items-center max-w-5xl w-full">
-         <div class="flex-1 aspect-video bg-black rounded-[2rem] overflow-hidden border-8 border-slate-900 shadow-2xl relative">
-           <video v-if="studio.localStream" :srcObject="studio.localStream" autoplay playsinline muted class="w-full h-full object-cover -scale-x-100"></video>
+         <div class="flex-1 aspect-video bg-[#0A0A0A] border border-neutral-800 rounded-md overflow-hidden relative">
+           <video 
+             v-if="studio.localStream" 
+             :srcObject="studio.localStream" 
+             autoplay 
+             playsinline 
+             muted 
+             class="w-full h-full object-cover -scale-x-100"
+             @mounted="(el) => el.srcObject = studio.localStream"
+           ></video>
+           <div v-else class="w-full h-full flex items-center justify-center">
+              <div class="w-8 h-8 border-2 border-neutral-800 border-t-white rounded-full animate-spin"></div>
+           </div>
          </div>
-         <div class="w-full max-w-sm text-left space-y-8">
-           <h1 class="text-6xl font-black tracking-tighter text-white">PAK <span class="text-orange-500">PRO</span></h1>
+         <div class="w-full max-w-sm text-left space-y-6">
+           <div class="flex items-center gap-4">
+             <div class="w-12 h-12 bg-white text-black font-bold flex items-center justify-center rounded-md text-xl">P</div>
+             <h1 class="text-4xl font-bold tracking-tighter text-white uppercase">Chasqui <span class="text-neutral-500">Pro</span></h1>
+           </div>
            <div class="space-y-4">
-             <input v-model="studio.userName" class="w-full bg-slate-900 border border-slate-800 text-white rounded-2xl px-6 py-4 font-bold outline-none ring-orange-500/20 focus:ring-4" />
-             <button @click="startStudio" class="w-full bg-orange-500 text-white font-black py-5 rounded-2xl shadow-xl shadow-orange-500/30 uppercase text-xs tracking-widest hover:bg-orange-600 transition-all">Entrar al Estudio</button>
+             <input v-model="studio.userName" class="w-full bg-black border border-neutral-800 text-white rounded-md px-4 py-3 text-sm focus:border-white outline-none transition-colors" placeholder="Tu nombre..." />
+             <button @click="startStudio" class="w-full bg-white text-black font-bold py-3 rounded-md text-sm hover:bg-neutral-200 transition-colors uppercase tracking-widest">Entrar al Estudio</button>
            </div>
          </div>
        </div>
@@ -83,56 +129,70 @@ onMounted(() => { studio.initLocalStream(); });
     <StudioHeader :is-streaming="isStreaming" @toggle-stream="toggleStreaming" />
 
     <div class="flex-1 flex overflow-hidden">
-      <main class="flex-1 flex flex-col overflow-hidden bg-[#0f172a]">
+      <main class="flex-1 flex flex-col min-h-0 overflow-hidden bg-[#050505]">
         
-        <!-- PROGRAM VIEW (Escenario) -->
-        <div class="flex-1 min-h-0 relative flex items-center justify-center bg-black overflow-hidden group">
-          <div class="w-full h-full relative flex items-center justify-center">
-            <VideoCanvas ref="videoCanvas" class="w-full h-full" />
-            
-            <!-- Layout Selector Flotante -->
-            <div class="absolute bottom-8 left-1/2 -translate-x-1/2 bg-slate-900/80 backdrop-blur-xl shadow-2xl rounded-2xl p-2 flex gap-1 z-40 border border-white/10 opacity-0 group-hover:opacity-100 transition-all">
-              <button v-for="l in ['solo', 'grid', 'sidebar', 'pip']" :key="l" @click="studio.layout = l" 
-                :class="[studio.layout === l ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'text-slate-400 hover:bg-white/5']"
-                class="px-4 h-9 flex items-center justify-center rounded-xl transition-all uppercase text-[9px] font-black tracking-widest"
-              >{{ l }}</button>
+        <!-- ZONA DE ESCENARIO: MAXIMIZADO (FULL BLEED) -->
+        <div class="flex-1 relative bg-[#050505] overflow-hidden flex items-center justify-center">
+                      <div class="aspect-video h-full w-full max-w-full max-h-full relative shadow-2xl bg-black flex items-center justify-center">
+                      <VideoCanvas ref="videoCanvas" class="w-full h-full" />
+                      
+                      <!-- Badge LIVE Minimalista -->            <div v-if="isStreaming && studio.showLiveBadge" class="absolute top-4 left-4 flex items-center gap-2 bg-black/90 border border-white/10 px-3 py-1.5 rounded-md backdrop-blur-md z-10">
+                <div class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                <span class="text-[10px] font-bold tracking-[0.2em] text-white">STREAMING LIVE</span>
+            </div>
+
+            <!-- Badge REC -->
+            <div v-if="studio.isRecording && studio.showLiveBadge" class="absolute top-4 right-4 flex items-center gap-2 bg-red-600/90 border border-white/10 px-3 py-1.5 rounded-md backdrop-blur-md z-10">
+                <div class="w-2 h-2 rounded-full bg-white animate-pulse"></div>
+                <span class="text-[10px] font-bold tracking-[0.2em] text-white uppercase">Grabando</span>
             </div>
           </div>
         </div>
 
-        <!-- BACKSTAGE DOCK (Fuentes de Video) -->
-        <div class="h-40 bg-[#020617] border-t border-white/5 flex flex-col shadow-2xl">
-          <div class="px-8 py-2 border-b border-white/5 flex justify-between items-center">
-            <span class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Fuentes de Video</span>
-            <div class="flex gap-4">
-              <span class="text-[9px] font-bold text-orange-500 animate-pulse">{{ studio.guestConnected ? '1 Invitado Conectado' : 'Esperando Invitados' }}</span>
-            </div>
+        <!-- DOCK DE CONTROL INTEGRADO (LAYOUTS) -->
+        <div class="h-10 border-t border-neutral-800 bg-black flex items-center justify-center gap-1 px-4 shrink-0 z-20">
+          <button v-for="l in ['solo', 'grid', 'sidebar', 'pip']" :key="l" @click="studio.layout = l" 
+            :class="[studio.layout === l ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-white hover:bg-neutral-900']"
+            class="px-4 h-6 flex items-center justify-center rounded-sm transition-all uppercase text-[8px] font-bold tracking-widest border border-transparent hover:border-neutral-800"
+          >{{ l }}</button>
+        </div>
+
+        <!-- BARRA DE ESTADO Y GUEST LIST (COMPACTA) -->
+        <div class="h-14 bg-neutral-900 border-t border-neutral-800 flex items-center px-4 justify-between shrink-0 z-30">
+          
+          <!-- Izquierda: Host Info -->
+          <div class="flex items-center gap-4">
+             <div class="flex items-center gap-2 px-3 py-1.5 bg-black rounded-md border border-neutral-800">
+                <div class="w-2 h-2 rounded-full" :class="studio.isMicOn ? 'bg-green-500' : 'bg-red-500'"></div>
+                <span class="text-[10px] font-bold text-neutral-300 uppercase tracking-widest">{{ studio.userName }} (Host)</span>
+             </div>
           </div>
-          <div class="flex-1 flex gap-4 overflow-x-auto p-4 px-10 items-center scrollbar-hide">
-            <UserCameraCard 
-              id="local"
-              :stream="studio.localStream" 
-              :name="studio.userName" 
-              :is-local="true" 
-            />
-            
-            <UserCameraCard 
-              v-if="studio.guestConnected"
-              id="guest"
-              :stream="studio.guestStream"
-              :name="'Invitado'" 
-            />
-            
-            <div v-else class="min-w-[160px] aspect-video border-2 border-dashed border-white/5 rounded-xl flex flex-col items-center justify-center text-slate-600 gap-2 italic text-[10px] bg-white/[0.02] hover:bg-white/[0.04] transition-colors cursor-help">
-               <svg class="w-5 h-5 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" stroke-width="2"/></svg>
-               <span>Esperando invitado...</span>
-            </div>
+
+          <!-- Centro: Guest List (Chips) -->
+          <div class="flex items-center gap-2">
+             <span class="text-[9px] font-bold text-neutral-600 uppercase tracking-widest mr-2">Participantes:</span>
+             
+             <!-- Chip de Invitado -->
+             <div v-if="studio.guestConnected" class="flex items-center gap-3 px-3 py-1.5 bg-neutral-800 border border-neutral-700 rounded-full animate-in fade-in slide-in-from-bottom-2">
+                <span class="text-[10px] font-bold text-white uppercase">👤 Invitado</span>
+                <div class="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                <button @click="studio.guestConnected = false" class="text-neutral-500 hover:text-white transition-colors ml-1 font-bold text-xs">×</button>
+             </div>
+             
+             <div v-else class="text-[10px] text-neutral-600 italic font-medium">No hay invitados conectados</div>
           </div>
+
+          <!-- Derecha: Acciones Rápidas -->
+          <div class="flex items-center gap-3">
+             <button @click="showInviteModal = true" class="px-4 py-2 bg-white text-black text-[9px] font-bold uppercase tracking-widest rounded-md hover:bg-neutral-200 transition-colors">
+               Invitar
+             </button>
+          </div>
+
         </div>
       </main>
 
       <StudioSidebar 
-        class="border-l border-white/5"
         :is-tunnel-active="isTunnelActive" 
         :guest-link="guestLink"
         @toggle-tunnel="toggleTunnel" 
@@ -141,17 +201,73 @@ onMounted(() => { studio.initLocalStream(); });
       />
     </div>
 
-    <StudioFooter />
+    <StudioFooter @open-invite="showInviteModal = true" />
 
-    <div v-if="isTunnelLoading" class="fixed inset-0 bg-black/90 backdrop-blur-xl z-[2000] flex flex-col items-center justify-center">
-      <div class="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-6"></div>
-      <p class="text-[10px] font-black text-white uppercase tracking-widest animate-pulse">Configurando Túnel Seguro...</p>
+    <!-- MODAL DE INVITACIÓN -->
+    <div v-if="showInviteModal" class="fixed inset-0 z-[3000] flex items-center justify-center p-4">
+      <div class="absolute inset-0 bg-black/80 backdrop-blur-md" @click="showInviteModal = false"></div>
+      
+      <div class="relative bg-neutral-900 border border-neutral-700 w-full max-w-md rounded-xl overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+        <div class="p-6 space-y-6">
+          <div class="flex justify-between items-center">
+            <h3 class="text-xl font-bold tracking-tight text-white">Invitar Participante</h3>
+            <button @click="showInviteModal = false" class="text-neutral-500 hover:text-white text-2xl">&times;</button>
+          </div>
+
+          <div class="flex flex-col items-center gap-6 py-4">
+            <div class="p-4 bg-white rounded-lg shadow-inner">
+               <QrcodeVue :value="guestLink || `http://${window.location.hostname}:8080/invitado`" :size="200" level="H" />
+            </div>
+            <p class="text-[10px] text-neutral-400 uppercase font-bold tracking-[0.2em] text-center">Escanea para unirte desde el móvil</p>
+          </div>
+
+          <div class="space-y-3">
+            <label class="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">Enlace Directo</label>
+            <div class="flex gap-2">
+              <input readonly :value="guestLink || `http://${window.location.hostname}:8080/invitado`" class="flex-1 bg-black border border-neutral-700 rounded-md px-4 py-3 text-xs text-white outline-none focus:border-neutral-500" />
+              <button @click="copyLink" class="bg-white text-black px-6 rounded-md font-bold text-[10px] uppercase tracking-widest hover:bg-neutral-200 transition-colors">
+                {{ copyNotification ? '¡Copiado!' : 'Copiar' }}
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <div class="bg-neutral-900/50 p-4 border-t border-neutral-800 flex items-center gap-3">
+           <div class="w-2 h-2 rounded-full bg-green-500"></div>
+           <span class="text-[9px] font-bold text-neutral-400 uppercase tracking-widest">Estudio listo para recibir invitados</span>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="isTunnelLoading" class="fixed inset-0 bg-black/90 z-[2000] flex flex-col items-center justify-center">
+      <div class="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin mb-4"></div>
+      <p class="text-[10px] font-bold text-white uppercase tracking-widest">Procesando Túnel...</p>
     </div>
   </div>
 </template>
 
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&family=Bebas+Neue&family=Space+Grotesk:wght@400;700&family=Inter:wght@400;600;900&family=Montserrat:wght@400;700;900&display=swap');
-html, body, #app { height: 100%; margin: 0; padding: 0; overflow: hidden; background: white; font-family: 'Inter', sans-serif; }
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+html, body, #app { height: 100%; margin: 0; padding: 0; overflow: hidden; background: black; font-family: 'Inter', sans-serif; }
+
 .scrollbar-hide::-webkit-scrollbar { display: none; }
+
+
+
+@keyframes marquee {
+
+  0% { transform: translateX(100%); }
+
+  100% { transform: translateX(-100%); }
+
+}
+
+.animate-marquee {
+
+  animation: marquee 15s linear infinite;
+
+}
+
 </style>
